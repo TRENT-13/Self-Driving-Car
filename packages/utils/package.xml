@@ -1,0 +1,11 @@
+<package>
+  <name>utils</name>
+  <version>0.0.1</version>
+  <description>
+  Lane follower package for the autonomous driving project.
+  </description>
+  <maintainer email="notarealmail@gmail.com">Team Quack</maintainer>
+  <license>None</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+</package>

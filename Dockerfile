@@ -1,7 +1,7 @@
 # parameters
-ARG REPO_NAME="<autonomous-driving-project>"
-ARG DESCRIPTION="<Final project for Software Engineering Practical Course>"
-ARG MAINTAINER="<Giorgi Kochlamazashvili> (<gkochlmazashvili04@gmail.com>)"
+ARG REPO_NAME="autonomous-driving-project"
+ARG DESCRIPTION="Final project for Software Engineering Practical Course"
+ARG MAINTAINER="Team Quack> (notarealmail@gmail.com)"
 # pick an icon from: https://fontawesome.com/v4.7.0/icons/
 ARG ICON="cube"
 
@@ -12,10 +12,18 @@ ARG DISTRO=daffy
 ARG DOCKER_REGISTRY=docker.io
 ARG BASE_IMAGE=dt-ros-commons
 ARG BASE_TAG=${DISTRO}-${ARCH}
-ARG LAUNCHER=default
+ARG LAUNCHER=display
 
 # define base image
 FROM ${DOCKER_REGISTRY}/duckietown/${BASE_IMAGE}:${BASE_TAG} as base
+
+RUN apt-key del F42ED6FBAB17C654 || true \
+    && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654 || true \
+    && apt-get update || true \
+    && apt-get install --reinstall ca-certificates -y || true \
+    && wget https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc -O /etc/apt/trusted.gpg.d/ros.asc \
+    && chmod a+r /etc/apt/trusted.gpg.d/ros.asc \
+    && apt-get update
 
 # recall all arguments
 ARG DISTRO
@@ -54,6 +62,39 @@ ENV DT_MODULE_TYPE="${REPO_NAME}" \
 COPY ./dependencies-apt.txt "${REPO_PATH}/"
 RUN dt-apt-install ${REPO_PATH}/dependencies-apt.txt
 
+EXPOSE 5900 6080
+
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip3 install --no-cache-dir --upgrade numpy scipy
+    
+RUN apt-get update && apt-get install -y \
+    libegl1-mesa-dev \
+    libgl1-mesa-glx \
+    libxrandr2 \
+    libxss1 \
+    libxcursor1 \
+    libxcomposite1 \
+    libasound2 \
+    libxi6 \
+    libxtst6 \
+    libglu1-mesa \
+    libglu1-mesa-dev \
+    mesa-utils \
+    freeglut3-dev \
+    libglew-dev \
+    && rm -rf /var/lib/apt/lists/*
+    
+RUN apt-get update && apt-get install -y \
+    xvfb \
+    x11-utils \
+    x11vnc \
+    fluxbox \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables for headless operation
+ENV DISPLAY=:99
+ENV PYGLET_HEADLESS=1
+
 # install python3 dependencies
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
@@ -74,6 +115,7 @@ RUN dt-install-launchers "${LAUNCH_PATH}"
 
 # define default command
 CMD ["bash", "-c", "dt-launcher-${DT_LAUNCHER}"]
+
 
 # store module metadata
 LABEL org.duckietown.label.module.type="${REPO_NAME}" \
