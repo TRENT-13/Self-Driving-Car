@@ -55,6 +55,11 @@ class CameraReaderNode(DTROS):
         self.right_motor = rospy.Publisher("right_motor", Float64, queue_size=1)
 
         self.shutting_down = False
+
+        self.red_timer_start = None
+        self.red_stop_duration = 3.0
+        self.red_cooldown_start = None
+        self.red_cooldown_duration = 1.0
         
         rospy.on_shutdown(self.shutdown_hook)
 
@@ -111,7 +116,7 @@ class CameraReaderNode(DTROS):
         mask_red = cv2.bitwise_or(mask_red1, mask_red2)
 
         # Apply region of interest - focus on bottom part of image
-        mask_red[:int(h*0.55), :] = 0
+        mask_red[:int(h*0.8), :] = 0
 
         if np.count_nonzero(mask_red) > 50:
             vis_image[mask_red > 0] = [0, 0, 255]
@@ -231,15 +236,37 @@ class CameraReaderNode(DTROS):
         # Recovery behavior if no lines detected
         line_pixels_r = np.count_nonzero(mask_red)
         line_pixels_wy = np.count_nonzero(mask_yellow) + np.count_nonzero(mask_white)
-        if line_pixels_wy < 500:  # Very few line pixels detected
-            # Back up and turn to recover
-            if line_pixels_r > 100:
+
+        in_cooldown = (self.red_cooldown_start is not None and time.time() - self.red_cooldown_start < self.red_cooldown_duration)
+
+        if line_pixels_r > 300 and not in_cooldown:
+            if self.red_timer_start is None:
+                # First time detecting red - start timer
+                self.red_timer_start = time.time()
+            
+            # Check if timer is still running
+            if time.time() - self.red_timer_start < self.red_stop_duration:
+                # Stop the robot
                 left_motor = 0.0
                 right_motor = 0.0
             else:
+                # Timer finished - reset and continue normal operation
+                self.red_timer_start = None
+                self.red_cooldown_start = time.time()
+        elif line_pixels_r <= 100:
+            # No red detected - reset timers
+            self.red_timer_start = None
+            self.red_cooldown_start = None
+                
+        if in_cooldown and time.time() - self.red_cooldown_start >= self.red_cooldown_duration:
+            self.red_cooldown_start = None
+
+        # Original recovery behavior for no lines
+        if line_pixels_wy < 500:  # Very few line pixels detected
+            if line_pixels_r <= 100 and not in_cooldown:  # Only if not seeing red
                 left_motor = -0.2
-                right_motor = -0.3
-            
+                right_motor = -0.
+
         # Determine smoothing amount based on curve detection
         smoothing_amount = SMOOTHING_CURVE if is_curve else SMOOTHING_STRAIGHT
         self.left_motor_history = deque(self.left_motor_history, maxlen=smoothing_amount)
