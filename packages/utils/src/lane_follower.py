@@ -21,7 +21,6 @@ SMOOTHING_STRAIGHT = 3  # Smoothing for straight roads
 SMOOTHING_CURVE = 2     # Less smoothing for curves
 
 class CameraReaderNode(DTROS):
-
     def __init__(self, node_name):
         super(CameraReaderNode, self).__init__(
             node_name=node_name, node_type=NodeType.VISUALIZATION)
@@ -41,12 +40,11 @@ class CameraReaderNode(DTROS):
         # Setup ROS nodes
         self._vehicle_name = os.environ['VEHICLE_NAME']
 
-        self._camera_topic = f"/123/camera_node/image/compressed"
-        wheels_topic = f"/123/wheels_driver_node/wheels_cmd"
+        self._camera_topic = f"/{self._vehicle_name}/camera_node/image/compressed"
+        wheels_topic = f"/{self._vehicle_name}/wheels_driver_node/wheels_cmd"
         self._window = "camera-reader"
         self.bridge = CvBridge()
         cv2.namedWindow(self._window, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(self._window, 800, 600) 
 
         self.sub = rospy.Subscriber(
             self._camera_topic, CompressedImage, self.callback)
@@ -98,16 +96,29 @@ class CameraReaderNode(DTROS):
         # Apply region of interest - focus on bottom part of image
         mask_yellow[:int(h*0.55), :] = 0
 
+        # Red color has two ranges in HSV due to hue wraparound
+        # Lower red range (0-10)
+        lb_red_hsv1 = np.array([0, 100, 100], dtype=np.uint8)
+        ub_red_hsv1 = np.array([10, 255, 255], dtype=np.uint8)
+        mask_red1 = cv2.inRange(hsv, lb_red_hsv1, ub_red_hsv1)
+
+        # Upper red range (170-180)
+        lb_red_hsv2 = np.array([170, 100, 100], dtype=np.uint8)
+        ub_red_hsv2 = np.array([180, 255, 255], dtype=np.uint8)
+        mask_red2 = cv2.inRange(hsv, lb_red_hsv2, ub_red_hsv2)
+
+        # Combine both red masks
+        mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+
+        # Apply region of interest - focus on bottom part of image
+        mask_red[:int(h*0.55), :] = 0
+
+        if np.count_nonzero(mask_red) > 50:
+            vis_image[mask_red > 0] = [0, 0, 255]
+
         # White line detection (usually right boundary)
         lb_white = np.array([0, 190, 0], dtype=np.uint8)
         ub_white = np.array([180, 255, 200], dtype=np.uint8)
-        mask_white = cv2.inRange(hls, lb_white, ub_white)
-        # Apply region of interest - focus on bottom part of image
-        mask_white[:int(h*0.55), :] = 0
-        
-        # White line detection (usually right boundary)
-        lb_white = np.array([0, 144, 0])  # Higher lightness threshold
-        ub_white = np.array([168, 255, 36])
         mask_white = cv2.inRange(hls, lb_white, ub_white)
         # Apply region of interest - focus on bottom part of image
         mask_white[:int(h*0.55), :] = 0
@@ -218,11 +229,16 @@ class CameraReaderNode(DTROS):
                 left_motor *= 1.3
         
         # Recovery behavior if no lines detected
-        line_pixels = np.count_nonzero(mask_yellow) + np.count_nonzero(mask_white)
-        if line_pixels < 500:  # Very few line pixels detected
+        line_pixels_r = np.count_nonzero(mask_red)
+        line_pixels_wy = np.count_nonzero(mask_yellow) + np.count_nonzero(mask_white)
+        if line_pixels_wy < 500:  # Very few line pixels detected
             # Back up and turn to recover
-            left_motor = -0.2
-            right_motor = -0.3
+            if line_pixels_r > 100:
+                left_motor = 0.0
+                right_motor = 0.0
+            else:
+                left_motor = -0.2
+                right_motor = -0.3
             
         # Determine smoothing amount based on curve detection
         smoothing_amount = SMOOTHING_CURVE if is_curve else SMOOTHING_STRAIGHT
@@ -248,8 +264,8 @@ class CameraReaderNode(DTROS):
         cv2.putText(vis_image, f"Error: {error:.2f}, Steer: {steering:.2f}", (10, 60), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 
-        # cv2.imshow(self._window, vis_image)
-        # cv2.waitKey(1)
+        cv2.imshow(self._window, vis_image)
+        cv2.waitKey(1)
 
 
 if __name__ == '__main__':

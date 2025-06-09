@@ -21,7 +21,7 @@ class WheelControlNode(DTROS):
         # static parameters
         self.vehicle_name = os.environ['VEHICLE_NAME']
 
-        wheels_topic = f"/123/wheels_driver_node/wheels_cmd"
+        wheels_topic = f"/{self.vehicle_name}/wheels_driver_node/wheels_cmd"
 
         self._vel_left = 0
         self._vel_right = 0
