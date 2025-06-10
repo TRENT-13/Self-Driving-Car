@@ -59,7 +59,10 @@ class CameraReaderNode(DTROS):
         self.red_timer_start = None
         self.red_stop_duration = 3.0
         self.red_cooldown_start = None
-        self.red_cooldown_duration = 1.0
+        self.red_cooldown_duration = 2.0
+
+        self.turn_state = -1
+        self.changed_state = False
         
         rospy.on_shutdown(self.shutdown_hook)
 
@@ -87,8 +90,6 @@ class CameraReaderNode(DTROS):
         
         # Define regions of interest - near field and far field
         h, w = self.image.shape[:2]
-        near_field = self.image[int(h*0.6):, :]  # Bottom 40% of image
-        far_field = self.image[int(h*0.4):int(h*0.6), :]  # Middle of image
         
         # Color space conversions
         hsv = cv2.cvtColor(self.image, cv2.COLOR_BGR2HSV)
@@ -239,7 +240,7 @@ class CameraReaderNode(DTROS):
 
         in_cooldown = (self.red_cooldown_start is not None and time.time() - self.red_cooldown_start < self.red_cooldown_duration)
 
-        if line_pixels_r > 300 and not in_cooldown:
+        if line_pixels_r > 800 and not in_cooldown:
             if self.red_timer_start is None:
                 # First time detecting red - start timer
                 self.red_timer_start = time.time()
@@ -253,19 +254,29 @@ class CameraReaderNode(DTROS):
                 # Timer finished - reset and continue normal operation
                 self.red_timer_start = None
                 self.red_cooldown_start = time.time()
-        elif line_pixels_r <= 100:
+                self.changed_state = False
+        else:
             # No red detected - reset timers
             self.red_timer_start = None
-            self.red_cooldown_start = None
-                
-        if in_cooldown and time.time() - self.red_cooldown_start >= self.red_cooldown_duration:
-            self.red_cooldown_start = None
 
-        # Original recovery behavior for no lines
-        if line_pixels_wy < 500:  # Very few line pixels detected
-            if line_pixels_r <= 100 and not in_cooldown:  # Only if not seeing red
-                left_motor = -0.2
-                right_motor = -0.
+        if in_cooldown:
+            if not self.changed_state:
+                self.turn_state +=1
+                self.changed_state = True
+
+            if self.turn_state == 0:
+                right_motor = 0.05
+                left_motor = 0.35
+            elif self.turn_state == 1:
+                right_motor = 0.55
+                left_motor = 0.4
+            else:
+                pass
+        else:
+            if line_pixels_wy < 500:  # Very few line pixels detected
+                if line_pixels_r <= 100:  # Only if not seeing red
+                    left_motor = -0.2
+                    right_motor = -0.3
 
         # Determine smoothing amount based on curve detection
         smoothing_amount = SMOOTHING_CURVE if is_curve else SMOOTHING_STRAIGHT
@@ -289,6 +300,10 @@ class CameraReaderNode(DTROS):
         cv2.putText(vis_image, f"Curve: {is_curve}, Dir: {curve_direction}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         cv2.putText(vis_image, f"Error: {error:.2f}, Steer: {steering:.2f}", (10, 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(vis_image, f"Cooldown: {in_cooldown}", (10, 90), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(vis_image, f"State: {self.turn_state}", (10, 120), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 
         cv2.imshow(self._window, vis_image)
