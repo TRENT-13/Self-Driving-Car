@@ -7,7 +7,7 @@ echo "Starting ROS Master..."
 
 roscore &
 
-echo "🚀 Starting VNC display for Duckietown..."
+echo "Starting VNC display for Duckietown..."
 
 # Kill any existing processes
 pkill -f Xvfb || true
@@ -23,10 +23,10 @@ export DISPLAY=:99
 
 # Test display
 if ! xdpyinfo -display :99 > /dev/null 2>&1; then
-    echo "❌ Display failed to start"
+    echo "Display failed to start"
     exit 1
 fi
-echo "✅ Display started: $DISPLAY"
+echo "Display started: $DISPLAY"
 
 # Start window manager
 echo "Starting window manager..."
@@ -40,10 +40,10 @@ sleep 2
 
 # Verify VNC is running
 if ! netstat -tlnp | grep -q ":5900"; then
-    echo "❌ VNC server failed to start"
+    echo "VNC server failed to start"
     exit 1
 fi
-echo "✅ VNC server started on port 5900"
+echo "VNC server started on port 5900"
 
 # Install and start websockify
 echo "Setting up web interface..."
@@ -53,7 +53,7 @@ pip3 install websockify || echo "websockify installation check complete"
 websockify --web /usr/share/novnc 0.0.0.0:6080 localhost:5900 > /dev/null 2>&1 &
 sleep 3
 
-echo "✅ Web server started on port 6080"
+echo "Web server started on port 6080"
 
 # Set simulation environment
 export DISPLAY=:99
@@ -61,8 +61,8 @@ export PYGLET_HEADLESS=0
 export SDL_VIDEODRIVER=x11
 
 echo ""
-echo "🌐 Web VNC: http://localhost:6080/vnc.html"
-echo "📺 Direct VNC: localhost:5900"
+echo "Web VNC: http://localhost:6080/vnc.html"
+echo "Direct VNC: localhost:5900"
 echo ""
 
 # Test with a simple GUI application first
@@ -77,7 +77,7 @@ read
 # Kill xclock
 kill $XCLOCK_PID 2>/dev/null || true
 
-echo "🚗 Starting Duckietown simulator with keyboard controls..."
+echo "Starting Duckietown simulator with keyboard controls..."
 
 # Function to cleanup background processes
 cleanup() {
@@ -89,8 +89,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Start keyboard controls in background
-echo "🎮 Starting keyboard controls..."
-DISPLAY=:99 dt-exec rosrun simulator manual_control.py --env-name Duckietown-small_loop-v0 &
+echo "Starting keyboard controls..."
+DISPLAY=:99 dt-exec rosrun simulator manual_control.py &
 SIMULATOR_PID=$!
 
 # Wait for both processes
