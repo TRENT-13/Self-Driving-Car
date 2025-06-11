@@ -91,6 +91,12 @@ RUN apt-get update && apt-get install -y \
     fluxbox \
     && rm -rf /var/lib/apt/lists/*
 
+
+# RUN pip install torch torchvision
+# RUN pip install ultralytics
+# RUN pip install duckietown-gym-daffy
+# RUN apt-get update && apt-get install --reinstall -y python3-opencv
+
 # Set environment variables for headless operation
 ENV DISPLAY=:99
 ENV PYGLET_HEADLESS=1
@@ -112,6 +118,8 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
 # install launcher scripts
 COPY ./launchers/. "${LAUNCH_PATH}/"
 RUN dt-install-launchers "${LAUNCH_PATH}"
+
+RUN pip uninstall -y opencv-python opencv-python-headless
 
 # define default command
 CMD ["bash", "-c", "dt-launcher-${DT_LAUNCHER}"]

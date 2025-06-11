@@ -10,6 +10,7 @@ from cv_bridge import CvBridge
 from std_msgs.msg import Float64
 from collections import deque
 import time
+# import torch
 
 # Tunable parameters
 BASE_SPEED = 0.25  # Base forward speed
@@ -19,6 +20,12 @@ D_GAIN = 0.2       # Derivative gain - helps with curves
 MAX_STEER = 0.5    # Maximum steering adjustment
 SMOOTHING_STRAIGHT = 3  # Smoothing for straight roads
 SMOOTHING_CURVE = 2     # Less smoothing for curves
+
+# Alignment parameters
+ALIGNMENT_P_GAIN = 0.1    # Proportional gain for red alignment
+ALIGNMENT_MAX_SPEED = 0.1  # Maximum speed during alignment
+MIN_RED_WIDTH = 50        # Minimum width of red mask to attempt alignment
+MODEL_PATH = 'yolov5'
 
 class CameraReaderNode(DTROS):
     def __init__(self, node_name):
@@ -64,6 +71,21 @@ class CameraReaderNode(DTROS):
         self.turn_state = -1
         self.changed_state = False
         
+        # self.model = None
+        # yolov5_model_path = 'yolov5.pt' # Assuming this file is in your script's directory
+        
+        # try:
+        #     rospy.loginfo(f"Loading YOLOv5 model from: {yolov5_model_path}")
+        #     self.model = torch.hub.load('ultralytics/yolov5', 'custom', path=yolov5_model_path, force_reload=True)
+        #     self.model.eval() # Set to evaluation mode
+        #     # Optional: Set inference parameters (tune these as needed)
+        #     # self.yolov5_model.conf = 0.5   # Confidence threshold
+        #     # self.yolov5_model.iou = 0.45 # NMS IoU threshold
+        #     rospy.loginfo("YOLOv5 model loaded successfully.")
+        # except Exception as e:
+        #     rospy.logerr(f"Failed to load YOLOv5 model: {e}")
+        #     rospy.logwarn("YOLOv5 inference will not be available.")
+
         rospy.on_shutdown(self.shutdown_hook)
 
     def shutdown_hook(self):
@@ -77,11 +99,53 @@ class CameraReaderNode(DTROS):
         history_buffer.append(value)
         return sum(history_buffer) / len(history_buffer)
     
+    def calculate_red_alignment(self, mask_red, vis_image):
+        """
+        Calculate alignment correction based on red mask edges
+        Returns alignment_error and whether alignment is possible
+        """
+        h, w = mask_red.shape
+        
+        # Focus on the bottom portion where red should be most visible
+        roi_start = int(h * 0.7)  # Bottom 30% of image
+        roi_mask = mask_red[roi_start:, :]
+        
+        # Find all non-zero points in the ROI
+        red_points = np.where(roi_mask > 0)
+        
+        if len(red_points[1]) < MIN_RED_WIDTH:  # Not enough red pixels
+            return 0, False
+            
+        # Get the leftmost and rightmost red pixels
+        left_edge = np.min(red_points[1])
+        right_edge = np.max(red_points[1])
+        red_width = right_edge - left_edge
+        
+        if red_width < MIN_RED_WIDTH:  # Red area too narrow
+            return 0, False
+            
+        # Calculate center of red area
+        red_center = (left_edge + right_edge) / 2
+        image_center = w / 2
+        
+        # Calculate alignment error (positive = red is to the right, need to turn left)
+        alignment_error = (red_center - image_center) / (w / 2)  # Normalize to [-1, 1]
+        
+        # Draw visualization
+        roi_y = roi_start + roi_mask.shape[0] // 2
+        cv2.circle(vis_image, (int(left_edge), roi_y), 5, (255, 0, 0), -1)  # Left edge - blue
+        cv2.circle(vis_image, (int(right_edge), roi_y), 5, (0, 255, 0), -1)  # Right edge - green
+        cv2.circle(vis_image, (int(red_center), roi_y), 5, (255, 255, 0), -1)  # Center - cyan
+        cv2.line(vis_image, (int(image_center), roi_y-10), (int(image_center), roi_y+10), (255, 255, 255), 2)  # Image center
+        
+        return alignment_error, True
+    
     def callback(self, msg):
         if self.shutting_down:
             return
         
         self.image = self.bridge.compressed_imgmsg_to_cv2(msg)
+
         # Process image
         self.image = cv2.bilateralFilter(self.image, 9, 75, 75)  # Less aggressive filtering
 
@@ -90,16 +154,66 @@ class CameraReaderNode(DTROS):
         
         # Define regions of interest - near field and far field
         h, w = self.image.shape[:2]
+
+        # detections = []
+        # if self.model is not None:
+        #     try:
+        #         # The YOLOv5 model expects RGB. OpenCV reads as BGR.
+        #         # Convert BGR to RGB if your model was trained on RGB images.
+        #         # Otherwise, if your model was trained on BGR, you might skip this.
+        #         # Most pre-trained YOLOv5 models from Ultralytics expect RGB.
+        #         image_rgb = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
+                
+        #         # Perform inference
+        #         results = self.model(image_rgb)
+                
+        #         # Get detections as a pandas DataFrame for easy access
+        #         # results.pandas().xyxy[0] returns a DataFrame for the first (and only) image in the batch
+        #         detections_df = results.pandas().xyxy[0]
+                
+        #         # Convert DataFrame to a list of dictionaries or tuples for easier processing
+        #         detections = detections_df.to_dict(orient='records')
+
+        #         # Optional: Draw YOLOv5 detections on vis_image
+        #         # The `results.render()` method is a convenient way to get an annotated image
+        #         # However, it returns a NumPy array, which might overwrite your vis_image if not handled carefully.
+        #         # For direct drawing onto `vis_image` without `results.render()`:
+        #         for det in detections:
+        #             x1, y1, x2, y2 = int(det['xmin']), int(det['ymin']), int(det['xmax']), int(det['ymax'])
+        #             label = det['name']
+        #             conf = det['confidence']
+        #             color = (0, 255, 0) # Green for bounding boxes
+        #             cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, 2)
+        #             cv2.putText(vis_image, f"{label} {conf:.2f}", (x1, y1 - 10), 
+        #                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        #         cv2.putText(vis_image, f"YOLOv5 Detections: {len(detections)}", (10, h - 30),
+        #                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+
+        #     except Exception as e:
+        #         rospy.logerr(f"Error during YOLOv5 inference: {e}")
         
         # Color space conversions
         hsv = cv2.cvtColor(self.image, cv2.COLOR_BGR2HSV)
         hls = cv2.cvtColor(self.image, cv2.COLOR_BGR2HLS)
 
         # Yellow line detection (usually left boundary)
-        lb_yellow_hsv = np.array([20, 100, 100], dtype=np.uint8)
-        ub_yellow_hsv = np.array([40, 255, 255], dtype=np.uint8)
-        mask_yellow = cv2.inRange(hsv, lb_yellow_hsv, ub_yellow_hsv)
-        # Apply region of interest - focus on bottom part of image
+        lb_yellow_hsv = np.array([22, 120, 120], dtype=np.uint8)
+        ub_yellow_hsv = np.array([35, 255, 255], dtype=np.uint8)
+        mask_yellow_hsv = cv2.inRange(hsv, lb_yellow_hsv, ub_yellow_hsv)
+
+        # Convert to LAB color space for additional filtering
+        lab = cv2.cvtColor(self.image, cv2.COLOR_BGR2LAB)
+        # In LAB: L=lightness, A=green-red, B=blue-yellow
+        # Yellow has high B values, grass typically has lower B values
+        lb_yellow_lab = np.array([50, 100, 130], dtype=np.uint8)  # High B for yellow
+        ub_yellow_lab = np.array([255, 140, 200], dtype=np.uint8)
+        mask_yellow_lab = cv2.inRange(lab, lb_yellow_lab, ub_yellow_lab)
+
+        # Combine both masks
+        mask_yellow = cv2.bitwise_and(mask_yellow_hsv, mask_yellow_lab)
+
+        # Apply region of interest
         mask_yellow[:int(h*0.55), :] = 0
 
         # Red color has two ranges in HSV due to hue wraparound
@@ -239,6 +353,7 @@ class CameraReaderNode(DTROS):
         line_pixels_wy = np.count_nonzero(mask_yellow) + np.count_nonzero(mask_white)
 
         in_cooldown = (self.red_cooldown_start is not None and time.time() - self.red_cooldown_start < self.red_cooldown_duration)
+        at_red_stop = False  # Flag to track if we're at a red stop
 
         if line_pixels_r > 800 and not in_cooldown:
             if self.red_timer_start is None:
@@ -247,13 +362,34 @@ class CameraReaderNode(DTROS):
             
             # Check if timer is still running
             if time.time() - self.red_timer_start < self.red_stop_duration:
-                # Stop the robot
-                left_motor = 0.0
-                right_motor = 0.0
+                # We're at a red stop - perform alignment
+                at_red_stop = True
+                
+                # Calculate red alignment
+                alignment_error, can_align = self.calculate_red_alignment(mask_red, vis_image)
+                
+                if can_align:
+                    # Use red alignment to make minor corrections while stopped
+                    alignment_correction = ALIGNMENT_P_GAIN * alignment_error
+                    alignment_correction = np.clip(alignment_correction, -ALIGNMENT_MAX_SPEED, ALIGNMENT_MAX_SPEED)
+                    
+                    # Apply small alignment movements
+                    left_motor = alignment_correction
+                    right_motor = -alignment_correction
+                else:
+                    # Can't align - just stay stopped
+                    left_motor = 0.0
+                    right_motor = 0.0
             else:
                 # Timer finished - reset and continue normal operation
                 self.red_timer_start = None
                 self.red_cooldown_start = time.time()
+
+                if self.turn_state == 1:
+                    self.red_cooldown_duration = 2.5
+                else:
+                    self.red_cooldown_duration = 2.0
+
                 self.changed_state = False
         else:
             # No red detected - reset timers
@@ -261,16 +397,18 @@ class CameraReaderNode(DTROS):
 
         if in_cooldown:
             if not self.changed_state:
-                self.turn_state +=1
+                self.turn_state += 1
                 self.changed_state = True
 
+            # Original turning behavior during cooldown (no alignment here)
             if self.turn_state == 0:
                 right_motor = 0.05
-                left_motor = 0.35
+                left_motor = 0.35   
             elif self.turn_state == 1:
-                right_motor = 0.55
+                right_motor = 0.5
                 left_motor = 0.4
             else:
+                self.turn_state = -1
                 pass
         else:
             if line_pixels_wy < 500:  # Very few line pixels detected
@@ -283,9 +421,10 @@ class CameraReaderNode(DTROS):
         self.left_motor_history = deque(self.left_motor_history, maxlen=smoothing_amount)
         self.right_motor_history = deque(self.right_motor_history, maxlen=smoothing_amount)
         
-        # Apply smoothing
-        left_motor = self.smooth_motor_value(left_motor, self.left_motor_history)
-        right_motor = self.smooth_motor_value(right_motor, self.right_motor_history)
+        # Apply smoothing (but not during red alignment as we want precise control)
+        if not at_red_stop:
+            left_motor = self.smooth_motor_value(left_motor, self.left_motor_history)
+            right_motor = self.smooth_motor_value(right_motor, self.right_motor_history)
         
         # Safety bounds
         left_motor = np.clip(left_motor, -1.0, 1.0)
@@ -301,10 +440,18 @@ class CameraReaderNode(DTROS):
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         cv2.putText(vis_image, f"Error: {error:.2f}, Steer: {steering:.2f}", (10, 60), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        cv2.putText(vis_image, f"Cooldown: {in_cooldown}", (10, 90), 
+        cv2.putText(vis_image, f"At Red Stop: {at_red_stop}", (10, 90), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        cv2.putText(vis_image, f"State: {self.turn_state}", (10, 120), 
+        cv2.putText(vis_image, f"Cooldown: {in_cooldown}", (10, 120), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(vis_image, f"State: {self.turn_state}", (10, 150), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # Show red alignment info if at red stop
+        if at_red_stop:
+            alignment_error, can_align = self.calculate_red_alignment(mask_red, vis_image)
+            cv2.putText(vis_image, f"Red Align: {alignment_error:.2f} {'OK' if can_align else 'NO'}", (10, 180), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 
         cv2.imshow(self._window, vis_image)
         cv2.waitKey(1)

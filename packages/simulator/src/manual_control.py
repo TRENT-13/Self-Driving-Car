@@ -41,17 +41,17 @@ class DuckietownROSBridge:
 
         # Create publishers
         self.image_pub = rospy.Publisher(
-            f'/123/camera_node/image/raw', 
+            f'/{self.veh_name}/camera_node/image/raw', 
             Image, 
             queue_size=1
         )
         self.compressed_pub = rospy.Publisher(
-            f'/123/camera_node/image/compressed', 
+            f'/{self.veh_name}/camera_node/image/compressed', 
             CompressedImage, 
             queue_size=1
         )
         
-        wheels_cmd_topic = f"/123/wheels_driver_node/wheels_cmd"
+        wheels_cmd_topic = f"/{self.veh_name}/wheels_driver_node/wheels_cmd"
 
         self.wheels_sub = rospy.Subscriber(
             wheels_cmd_topic,
@@ -84,7 +84,7 @@ class DuckietownROSBridge:
             # Convert numpy array to ROS Image message
             ros_image = self.bridge.cv2_to_imgmsg(obs, encoding="rgb8")
             ros_image.header.stamp = rospy.Time.now()
-            ros_image.header.frame_id = f"123/camera_optical_frame"
+            ros_image.header.frame_id = f"{self.veh_name}/camera_optical_frame"
             
             # Publish raw image
             self.image_pub.publish(ros_image)
