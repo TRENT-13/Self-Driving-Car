@@ -71,20 +71,20 @@ class CameraReaderNode(DTROS):
         self.turn_state = -1
         self.changed_state = False
         
-        # self.model = None
-        # yolov5_model_path = 'yolov5.pt' # Assuming this file is in your script's directory
+        self.model = None
+        yolov5_model_path = 'yolov5.pt' # Assuming this file is in your script's directory
         
-        # try:
-        #     rospy.loginfo(f"Loading YOLOv5 model from: {yolov5_model_path}")
-        #     self.model = torch.hub.load('ultralytics/yolov5', 'custom', path=yolov5_model_path, force_reload=True)
-        #     self.model.eval() # Set to evaluation mode
-        #     # Optional: Set inference parameters (tune these as needed)
-        #     # self.yolov5_model.conf = 0.5   # Confidence threshold
-        #     # self.yolov5_model.iou = 0.45 # NMS IoU threshold
-        #     rospy.loginfo("YOLOv5 model loaded successfully.")
-        # except Exception as e:
-        #     rospy.logerr(f"Failed to load YOLOv5 model: {e}")
-        #     rospy.logwarn("YOLOv5 inference will not be available.")
+        try:
+            rospy.loginfo(f"Loading YOLOv5 model from: {yolov5_model_path}")
+            self.model = torch.hub.load('ultralytics/yolov5', 'custom', path=yolov5_model_path, force_reload=True)
+            self.model.eval() # Set to evaluation mode
+            # Optional: Set inference parameters (tune these as needed)
+            # self.yolov5_model.conf = 0.5   # Confidence threshold
+            # self.yolov5_model.iou = 0.45 # NMS IoU threshold
+            rospy.loginfo("YOLOv5 model loaded successfully.")
+        except Exception as e:
+            rospy.logerr(f"Failed to load YOLOv5 model: {e}")
+            rospy.logwarn("YOLOv5 inference will not be available.")
 
         rospy.on_shutdown(self.shutdown_hook)
 
@@ -155,43 +155,43 @@ class CameraReaderNode(DTROS):
         # Define regions of interest - near field and far field
         h, w = self.image.shape[:2]
 
-        # detections = []
-        # if self.model is not None:
-        #     try:
-        #         # The YOLOv5 model expects RGB. OpenCV reads as BGR.
-        #         # Convert BGR to RGB if your model was trained on RGB images.
-        #         # Otherwise, if your model was trained on BGR, you might skip this.
-        #         # Most pre-trained YOLOv5 models from Ultralytics expect RGB.
-        #         image_rgb = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
+        detections = []
+        if self.model is not None:
+            try:
+                # The YOLOv5 model expects RGB. OpenCV reads as BGR.
+                # Convert BGR to RGB if your model was trained on RGB images.
+                # Otherwise, if your model was trained on BGR, you might skip this.
+                # Most pre-trained YOLOv5 models from Ultralytics expect RGB.
+                image_rgb = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
                 
-        #         # Perform inference
-        #         results = self.model(image_rgb)
+                # Perform inference
+                results = self.model(image_rgb)
                 
-        #         # Get detections as a pandas DataFrame for easy access
-        #         # results.pandas().xyxy[0] returns a DataFrame for the first (and only) image in the batch
-        #         detections_df = results.pandas().xyxy[0]
+                # Get detections as a pandas DataFrame for easy access
+                # results.pandas().xyxy[0] returns a DataFrame for the first (and only) image in the batch
+                detections_df = results.pandas().xyxy[0]
                 
-        #         # Convert DataFrame to a list of dictionaries or tuples for easier processing
-        #         detections = detections_df.to_dict(orient='records')
+                # Convert DataFrame to a list of dictionaries or tuples for easier processing
+                detections = detections_df.to_dict(orient='records')
 
-        #         # Optional: Draw YOLOv5 detections on vis_image
-        #         # The `results.render()` method is a convenient way to get an annotated image
-        #         # However, it returns a NumPy array, which might overwrite your vis_image if not handled carefully.
-        #         # For direct drawing onto `vis_image` without `results.render()`:
-        #         for det in detections:
-        #             x1, y1, x2, y2 = int(det['xmin']), int(det['ymin']), int(det['xmax']), int(det['ymax'])
-        #             label = det['name']
-        #             conf = det['confidence']
-        #             color = (0, 255, 0) # Green for bounding boxes
-        #             cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, 2)
-        #             cv2.putText(vis_image, f"{label} {conf:.2f}", (x1, y1 - 10), 
-        #                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                # Optional: Draw YOLOv5 detections on vis_image
+                # The `results.render()` method is a convenient way to get an annotated image
+                # However, it returns a NumPy array, which might overwrite your vis_image if not handled carefully.
+                # For direct drawing onto `vis_image` without `results.render()`:
+                for det in detections:
+                    x1, y1, x2, y2 = int(det['xmin']), int(det['ymin']), int(det['xmax']), int(det['ymax'])
+                    label = det['name']
+                    conf = det['confidence']
+                    color = (0, 255, 0) # Green for bounding boxes
+                    cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(vis_image, f"{label} {conf:.2f}", (x1, y1 - 10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        #         cv2.putText(vis_image, f"YOLOv5 Detections: {len(detections)}", (10, h - 30),
-        #                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+                cv2.putText(vis_image, f"YOLOv5 Detections: {len(detections)}", (10, h - 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
 
-        #     except Exception as e:
-        #         rospy.logerr(f"Error during YOLOv5 inference: {e}")
+            except Exception as e:
+                rospy.logerr(f"Error during YOLOv5 inference: {e}")
         
         # Color space conversions
         hsv = cv2.cvtColor(self.image, cv2.COLOR_BGR2HSV)
