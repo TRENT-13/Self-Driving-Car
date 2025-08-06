@@ -2,6 +2,11 @@
 
 
 
+
+https://github.com/user-attachments/assets/14eb60d7-e453-4b1e-976e-0dcef0f207f4
+
+
+
 (**newer version of CPU with a dedicated GPU is needed to run yolo5vn locally,otherwise delay would be too much to handle**)
 This template provides a boilerplate repository
 for developing ROS-based software in Duckietown.
